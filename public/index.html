@@ -1,0 +1,598 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>NestJS WebSocket Chat</title>
+<script src="/socket.io/socket.io.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap');
+
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+
+:root{
+  --bg:#07090f;
+  --s1:#0e1118;
+  --s2:#161b25;
+  --s3:#1e2433;
+  --bdr:#2a3045;
+  --blue:#4f9cf9;
+  --green:#3ecf8e;
+  --amber:#f5a623;
+  --red:#f66;
+  --purple:#b57bff;
+  --txt:#d4daf0;
+  --muted:#6b7a99;
+  --r:8px;
+}
+
+html,body{height:100%;background:var(--bg);color:var(--txt);font-family:'IBM Plex Sans',sans-serif;font-size:14px}
+
+/* ─── grid layout ─── */
+.shell{display:grid;grid-template-rows:52px 1fr;grid-template-columns:260px 1fr;height:100vh;overflow:hidden}
+.topbar{grid-column:1/-1;background:var(--s1);border-bottom:1px solid var(--bdr);display:flex;align-items:center;padding:0 18px;gap:14px;z-index:10}
+.sidebar{background:var(--s1);border-right:1px solid var(--bdr);display:flex;flex-direction:column;overflow:hidden}
+.content{display:flex;flex-direction:column;overflow:hidden;background:var(--bg)}
+
+/* ─── topbar ─── */
+.brand{font-family:'IBM Plex Mono',monospace;font-weight:700;font-size:14px;letter-spacing:.02em}
+.brand em{color:var(--blue);font-style:normal}
+.conn-pill{display:flex;align-items:center;gap:6px;font-size:11px;background:var(--s2);border:1px solid var(--bdr);border-radius:20px;padding:4px 10px;font-family:'IBM Plex Mono',monospace}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--red);transition:background .3s,box-shadow .3s;flex-shrink:0}
+.dot.on{background:var(--green);box-shadow:0 0 7px var(--green)}
+.pill-txt{color:var(--muted)}
+.ping-badge{margin-left:auto;font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--muted);display:flex;align-items:center;gap:8px}
+
+/* ─── buttons ─── */
+.btn{border:none;border-radius:6px;font-family:'IBM Plex Sans',sans-serif;font-size:12px;font-weight:600;padding:7px 13px;cursor:pointer;transition:opacity .15s,transform .1s}
+.btn:active{transform:scale(.97)}
+.btn:disabled{opacity:.35;cursor:not-allowed;transform:none}
+.btn-blue{background:var(--blue);color:#07090f}
+.btn-red{background:var(--red);color:#07090f}
+.btn-ghost{background:var(--s3);color:var(--txt);border:1px solid var(--bdr)}
+.btn-sm{padding:5px 10px;font-size:11px}
+
+/* ─── sidebar sections ─── */
+.sb-head{padding:14px 14px 6px;font-size:10px;font-weight:600;color:var(--muted);letter-spacing:.1em;text-transform:uppercase;font-family:'IBM Plex Mono',monospace}
+.sb-block{padding:10px 12px;border-bottom:1px solid var(--bdr);display:flex;flex-direction:column;gap:7px}
+.field{background:var(--bg);border:1px solid var(--bdr);color:var(--txt);border-radius:6px;padding:7px 10px;font-size:12px;font-family:'IBM Plex Sans',sans-serif;outline:none;transition:border-color .2s;width:100%}
+.field:focus{border-color:var(--blue)}
+.row{display:flex;gap:6px}
+.rooms-wrap{flex:1;overflow-y:auto;padding:6px}
+.room-row{display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:6px;cursor:pointer;transition:background .12s;font-size:13px}
+.room-row:hover{background:var(--s2)}
+.room-row.active{background:rgba(79,156,249,.1);color:var(--blue)}
+.room-hash{font-family:'IBM Plex Mono',monospace;color:var(--muted);font-size:13px}
+.room-badge{margin-left:auto;font-size:10px;background:var(--s3);border-radius:10px;padding:1px 7px;color:var(--muted);font-family:'IBM Plex Mono',monospace}
+.users-wrap{border-top:1px solid var(--bdr);padding:6px;max-height:150px;overflow-y:auto}
+.user-row{display:flex;align-items:center;gap:8px;padding:5px 10px;font-size:12px;color:var(--muted)}
+.udot{width:6px;height:6px;border-radius:50%;background:var(--green);flex-shrink:0}
+
+/* ─── concept tags strip ─── */
+.tags-strip{padding:7px 16px;display:flex;gap:5px;flex-wrap:wrap;border-bottom:1px solid var(--bdr);background:var(--s1)}
+.tag{font-size:10px;font-family:'IBM Plex Mono',monospace;font-weight:600;padding:2px 8px;border-radius:20px;border:1px solid;letter-spacing:.02em}
+.t-gw{color:#b57bff;border-color:#b57bff44;background:#b57bff0d}
+.t-srv{color:var(--blue);border-color:#4f9cf944;background:#4f9cf90d}
+.t-rm{color:var(--green);border-color:#3ecf8e44;background:#3ecf8e0d}
+.t-gd{color:var(--amber);border-color:#f5a62344;background:#f5a6230d}
+.t-ack{color:#f2cc60;border-color:#f2cc6044;background:#f2cc600d}
+.t-bc{color:#79c0ff;border-color:#79c0ff44;background:#79c0ff0d}
+
+/* ─── chat header ─── */
+.chat-hdr{padding:11px 18px;border-bottom:1px solid var(--bdr);background:var(--s1);display:flex;align-items:center;gap:12px;min-height:48px}
+.chat-title{font-weight:600;font-size:15px;font-family:'IBM Plex Mono',monospace}
+.chat-sub{font-size:11px;color:var(--muted)}
+.hdr-right{margin-left:auto;display:flex;gap:6px}
+
+/* ─── messages ─── */
+.msgs{flex:1;overflow-y:auto;padding:14px 18px;display:flex;flex-direction:column;gap:1px}
+.msg{display:flex;flex-direction:column;max-width:640px;padding:4px 0}
+.msg-me{align-self:flex-end;align-items:flex-end}
+.msg-hdr{display:flex;align-items:baseline;gap:8px;margin-bottom:3px}
+.msg-name{font-size:11px;font-weight:600;color:var(--blue);font-family:'IBM Plex Mono',monospace}
+.msg-me .msg-name{color:var(--green)}
+.msg-ts{font-size:10px;color:var(--muted);font-family:'IBM Plex Mono',monospace}
+.bubble{background:var(--s2);border:1px solid var(--bdr);border-radius:2px 10px 10px 10px;padding:8px 12px;font-size:13px;line-height:1.55;word-break:break-word}
+.msg-me .bubble{background:rgba(79,156,249,.08);border-color:rgba(79,156,249,.22);border-radius:10px 2px 10px 10px}
+.sys-msg{align-self:center;font-size:11px;color:var(--muted);padding:5px 0;display:flex;align-items:center;gap:8px;font-style:italic}
+.sys-msg::before,.sys-msg::after{content:'';flex:0 0 36px;height:1px;background:var(--bdr)}
+.dm-bubble{border-color:#f5a62344 !important;background:rgba(245,166,35,.06) !important}
+.dm-name{color:var(--amber) !important}
+
+/* ─── typing ─── */
+.typing-bar{height:24px;padding:0 18px;font-size:11px;color:var(--muted);display:flex;align-items:center;gap:7px;font-style:italic}
+.tdots span{display:inline-block;width:4px;height:4px;border-radius:50%;background:var(--muted);animation:tdot .7s infinite}
+.tdots span:nth-child(2){animation-delay:.15s}
+.tdots span:nth-child(3){animation-delay:.3s}
+@keyframes tdot{0%,80%,100%{transform:translateY(0)}40%{transform:translateY(-4px)}}
+
+/* ─── input bar ─── */
+.input-bar{padding:10px 18px;border-top:1px solid var(--bdr);background:var(--s1);display:flex;gap:8px;align-items:flex-end}
+.msg-ta{flex:1;resize:none;background:var(--bg);border:1px solid var(--bdr);color:var(--txt);border-radius:8px;padding:9px 12px;font-size:13px;font-family:'IBM Plex Sans',sans-serif;outline:none;transition:border-color .2s;min-height:40px;max-height:110px}
+.msg-ta:focus{border-color:var(--blue)}
+.msg-ta:disabled{opacity:.4}
+
+/* ─── event log ─── */
+.elog{border-top:1px solid var(--bdr);height:130px;overflow-y:auto;padding:7px 18px;background:var(--s1)}
+.elog-hdr{font-size:9px;color:var(--muted);letter-spacing:.1em;text-transform:uppercase;font-family:'IBM Plex Mono',monospace;margin-bottom:4px}
+.le{display:flex;gap:10px;font-family:'IBM Plex Mono',monospace;font-size:10px;line-height:1.6}
+.le-ts{color:var(--muted);flex-shrink:0}
+.le-emit{color:var(--purple)}
+.le-recv{color:var(--green)}
+.le-sys{color:var(--blue)}
+.le-err{color:var(--red)}
+
+/* ─── empty state ─── */
+.empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;color:var(--muted)}
+.empty-icon{font-size:38px;opacity:.35}
+.empty p{font-size:13px}
+
+/* ─── DM modal ─── */
+.overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:200;align-items:center;justify-content:center;backdrop-filter:blur(2px)}
+.overlay.show{display:flex}
+.modal{background:var(--s2);border:1px solid var(--bdr);border-radius:12px;padding:22px;width:360px;display:flex;flex-direction:column;gap:11px}
+.modal h3{font-size:14px;font-family:'IBM Plex Mono',monospace}
+.modal-hint{font-size:11px;color:var(--muted);font-family:'IBM Plex Mono',monospace;word-break:break-all}
+
+/* ─── scrollbar ─── */
+::-webkit-scrollbar{width:4px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--bdr);border-radius:2px}
+
+/* ─── concept tooltip ─── */
+.concept-badge{display:inline-flex;align-items:center;gap:4px;font-family:'IBM Plex Mono',monospace;font-size:9px;background:var(--s3);border:1px solid var(--bdr);border-radius:4px;padding:1px 6px;color:var(--muted);margin-left:6px;vertical-align:middle}
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <!-- ══ TOPBAR ══ -->
+  <header class="topbar">
+    <div class="brand">Nest<em>WS</em> Chat</div>
+    <div class="conn-pill">
+      <div class="dot" id="dot"></div>
+      <span class="pill-txt" id="connLabel">Disconnected</span>
+    </div>
+    <div class="ping-badge">
+      <span id="pingMs"></span>
+      <button class="btn btn-ghost btn-sm" onclick="doPing()" id="pingBtn" disabled>⚡ Ping</button>
+    </div>
+  </header>
+
+  <!-- ══ SIDEBAR ══ -->
+  <aside class="sidebar">
+
+    <div class="sb-head">Connection</div>
+    <div class="sb-block">
+      <input class="field" id="serverUrl" value="http://localhost:3000/chat" placeholder="ws://..."/>
+      <input class="field" id="uname"     value="User1"                       placeholder="Your username"/>
+      <div class="row">
+        <button class="btn btn-blue" id="conBtn"  style="flex:1" onclick="doConnect()">Connect</button>
+        <button class="btn btn-red"  id="disBtn"  style="flex:1" onclick="doDisconnect()" disabled>Disconnect</button>
+      </div>
+    </div>
+
+    <div class="sb-head">Rooms</div>
+    <div class="sb-block" style="padding-top:7px">
+      <div class="row">
+        <input class="field" id="roomIn" value="general" placeholder="room-name" style="flex:1"/>
+        <button class="btn btn-blue" id="joinBtn" onclick="joinRoom()" disabled>Join</button>
+      </div>
+    </div>
+
+    <div class="rooms-wrap" id="roomsWrap">
+      <div style="padding:10px 6px;font-size:11px;color:var(--muted);text-align:center">Connect first</div>
+    </div>
+
+    <div class="sb-head">Online</div>
+    <div class="users-wrap" id="usersWrap">
+      <div class="user-row" style="justify-content:center;font-size:11px">—</div>
+    </div>
+
+  </aside>
+
+  <!-- ══ CONTENT ══ -->
+  <div class="content">
+
+    <!-- concept tags -->
+    <div class="tags-strip">
+      <span class="tag t-gw">@WebSocketGateway</span>
+      <span class="tag t-srv">@WebSocketServer</span>
+      <span class="tag t-rm">Rooms</span>
+      <span class="tag t-gd">@UseGuards</span>
+      <span class="tag t-ack">ACK Callbacks</span>
+      <span class="tag t-bc">Broadcast Patterns</span>
+      <span class="tag t-gw" style="color:var(--green);border-color:#3ecf8e44;background:#3ecf8e0d">Lifecycle Hooks</span>
+      <span class="tag t-srv" style="color:var(--amber);border-color:#f5a62344;background:#f5a6230d">Namespaces</span>
+    </div>
+
+    <!-- chat header -->
+    <div class="chat-hdr">
+      <span class="chat-title" id="chatTitle">No room joined</span>
+      <span class="chat-sub"   id="chatSub"></span>
+      <div class="hdr-right">
+        <button class="btn btn-ghost btn-sm" id="dmBtn"    onclick="openDM()"    disabled>✉ DM</button>
+        <button class="btn btn-red   btn-sm" id="leaveBtn" onclick="leaveRoom()" disabled>Leave</button>
+      </div>
+    </div>
+
+    <!-- messages -->
+    <div class="msgs" id="msgs">
+      <div class="empty" id="emptyState">
+        <div class="empty-icon">⚡</div>
+        <p>Connect and join a room to start chatting</p>
+        <p style="font-size:11px;font-family:'IBM Plex Mono',monospace;color:var(--muted)">ws://localhost:3000/chat</p>
+      </div>
+    </div>
+
+    <!-- typing bar -->
+    <div class="typing-bar" id="typingBar"></div>
+
+    <!-- input bar -->
+    <div class="input-bar">
+      <textarea class="msg-ta" id="ta" rows="1" disabled
+        placeholder="Type a message… (Enter = send, Shift+Enter = newline)"
+        onkeydown="onKey(event)" oninput="onInput()"></textarea>
+      <button class="btn btn-blue" id="sendBtn" onclick="sendMsg()" disabled>Send</button>
+    </div>
+
+    <!-- event log -->
+    <div class="elog">
+      <div class="elog-hdr">📡 WebSocket Event Log — every emit &amp; receive</div>
+      <div id="elog"></div>
+    </div>
+
+  </div><!-- /content -->
+</div><!-- /shell -->
+
+<!-- DM modal -->
+<div class="overlay" id="dmOverlay">
+  <div class="modal">
+    <h3>✉ Send Private Message</h3>
+    <p style="font-size:11px;color:var(--muted)">Target socket ID (copy from event log)</p>
+    <div class="modal-hint" id="myIdHint"></div>
+    <input  class="field" id="dmTo"  placeholder="Target Socket ID"/>
+    <textarea class="field" id="dmMsg" rows="3" placeholder="Message content…"></textarea>
+    <div class="row">
+      <button class="btn btn-blue" style="flex:1" onclick="sendDM()">Send</button>
+      <button class="btn btn-ghost" style="flex:1" onclick="closeDM()">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ══════════════════════════════════════════════
+   STATE
+══════════════════════════════════════════════ */
+let socket       = null;
+let myId         = null;
+let myName       = 'User';
+let currentRoom  = null;
+let isTyping     = false;
+let typingTimer  = null;
+let typingPeers  = new Set();
+let joinedRooms  = new Set();
+
+/* ══════════════════════════════════════════════
+   CONCEPT 1 — @WebSocketGateway namespace + connect
+══════════════════════════════════════════════ */
+function doConnect() {
+  const url  = document.getElementById('serverUrl').value.trim();
+  myName = document.getElementById('uname').value.trim() || 'Guest';
+
+  log('sys', `Connecting → ${url}  username="${myName}"`);
+
+  /* CONCEPT 1: connect to /chat namespace with handshake query */
+  socket = io(url, {
+    query:      { username: myName },
+    transports: ['websocket'],
+  });
+
+  /* CONCEPT 7: OnGatewayConnection lifecycle */
+  socket.on('connect', () => {
+    myId = socket.id;
+    setOnline(true);
+    qs('#conBtn').disabled  = true;
+    qs('#disBtn').disabled  = false;
+    qs('#joinBtn').disabled = false;
+    qs('#pingBtn').disabled = false;
+    log('recv', `connect  socket.id=${socket.id}`);
+  });
+
+  /* CONCEPT 8: OnGatewayDisconnect lifecycle */
+  socket.on('disconnect', reason => {
+    setOnline(false);
+    resetUI();
+    log('err', `disconnect  reason=${reason}`);
+  });
+
+  socket.on('connect_error', e => log('err', `connect_error: ${e.message}`));
+
+  /* server stats on connect */
+  socket.on('server:stats', s => {
+    log('recv', `server:stats  users=${s.connectedUsers}  rooms=${s.activeRooms}`);
+    renderStats(s);
+  });
+
+  /* CONCEPT 12: receive broadcast message */
+  socket.on('room:message', msg => {
+    log('recv', `room:message  [${msg.roomId}] ${msg.senderName}: ${esc(msg.content).slice(0,50)}`);
+    appendMsg(msg);
+  });
+
+  /* room history on join */
+  socket.on('room:history', ({ roomId, messages }) => {
+    log('recv', `room:history  room=${roomId}  count=${messages.length}`);
+    renderHistory(messages);
+  });
+
+  /* user joined / left */
+  socket.on('room:user-joined', p => {
+    log('recv', `room:user-joined  ${p.username}  members=${p.memberCount}`);
+    updateSub(p.roomId, p.memberCount);
+  });
+  socket.on('room:user-left', p => {
+    log('recv', `room:user-left  ${p.username}  members=${p.memberCount}`);
+    updateSub(p.roomId, p.memberCount);
+  });
+
+  /* CONCEPT 12: typing broadcast (excludes sender) */
+  socket.on('room:typing-indicator', ({ username, isTyping: t }) => {
+    log('recv', `room:typing-indicator  ${username}  isTyping=${t}`);
+    t ? typingPeers.add(username) : typingPeers.delete(username);
+    renderTyping();
+  });
+
+  /* private DM */
+  socket.on('user:private-message', ({ from, content }) => {
+    log('recv', `user:private-message  from=${from}`);
+    appendDM(from, content);
+  });
+}
+
+/* CONCEPT 8: explicit disconnect */
+function doDisconnect() {
+  socket?.disconnect();
+  socket = null;
+}
+
+/* ══════════════════════════════════════════════
+   CONCEPT 9 — Rooms: socket.join()
+   CONCEPT 11 — ACK callback
+══════════════════════════════════════════════ */
+function joinRoom() {
+  const roomId = qs('#roomIn').value.trim() || 'general';
+
+  log('emit', `room:join  →  roomId=${roomId}  username=${myName}`);
+
+  /* CONCEPT 11: third argument is an ACK callback */
+  socket.emit('room:join', { roomId, username: myName }, ack => {
+    log('recv', `ACK room:join  success=${ack.success}  members=${ack.memberCount}`);
+    if (!ack.success) return;
+    currentRoom = roomId;
+    qs('#chatTitle').textContent = `# ${roomId}`;
+    qs('#chatSub').textContent   = `${ack.memberCount} member${ack.memberCount !== 1 ? 's' : ''}`;
+    qs('#ta').disabled      = false;
+    qs('#sendBtn').disabled  = false;
+    qs('#leaveBtn').disabled = false;
+    qs('#dmBtn').disabled    = false;
+    qs('#emptyState')?.remove();
+    addRoomTab(roomId);
+    joinedRooms.add(roomId);
+  });
+}
+
+/* CONCEPT 9: socket.leave() */
+function leaveRoom() {
+  if (!currentRoom) return;
+  log('emit', `room:leave  →  roomId=${currentRoom}`);
+  socket.emit('room:leave', { roomId: currentRoom }, ack => {
+    log('recv', `ACK room:leave  success=${ack?.success}`);
+  });
+  joinedRooms.delete(currentRoom);
+  currentRoom = null;
+  qs('#chatTitle').textContent = 'No room joined';
+  qs('#chatSub').textContent   = '';
+  qs('#ta').disabled      = true;
+  qs('#sendBtn').disabled  = true;
+  qs('#leaveBtn').disabled = true;
+  qs('#dmBtn').disabled    = true;
+  qs('#msgs').innerHTML    = '<div class="empty"><div class="empty-icon">💬</div><p>Join a room to chat</p></div>';
+}
+
+/* ══════════════════════════════════════════════
+   CONCEPT 3/4/5 — @SubscribeMessage, @MessageBody, @ConnectedSocket
+   CONCEPT 10    — @UseGuards runs on server side
+   CONCEPT 11    — ACK confirms delivery
+══════════════════════════════════════════════ */
+function sendMsg() {
+  const ta = qs('#ta');
+  const content = ta.value.trim();
+  if (!content || !currentRoom) return;
+
+  log('emit', `room:send-message  →  roomId=${currentRoom}  "${content.slice(0,40)}"`);
+
+  /* ACK: server guard + handler both run; ack returns result */
+  socket.emit('room:send-message', { roomId: currentRoom, content }, ack => {
+    if (ack?.success) log('recv', `ACK room:send-message  id=${ack.messageId}`);
+    else              log('err',  `ACK room:send-message  error=${ack?.error}`);
+  });
+
+  ta.value = ''; ta.style.height = 'auto';
+  stopTyping();
+}
+
+/* ══════════════════════════════════════════════
+   CONCEPT 12 — Typing indicator
+   Uses client.to(room) = broadcast EXCLUDING sender
+══════════════════════════════════════════════ */
+function onInput() {
+  if (!currentRoom) return;
+  if (!isTyping) {
+    isTyping = true;
+    socket.emit('room:typing', { roomId: currentRoom, isTyping: true });
+    log('emit', 'room:typing  →  isTyping=true');
+  }
+  clearTimeout(typingTimer);
+  typingTimer = setTimeout(stopTyping, 2000);
+}
+
+function stopTyping() {
+  if (isTyping && socket && currentRoom) {
+    isTyping = false;
+    socket.emit('room:typing', { roomId: currentRoom, isTyping: false });
+  }
+}
+
+/* ══════════════════════════════════════════════
+   Ping — round-trip ACK latency measurement
+══════════════════════════════════════════════ */
+function doPing() {
+  if (!socket) return;
+  const t0 = Date.now();
+  log('emit', 'ping  →');
+  socket.emit('ping', {}, res => {
+    const ms = Date.now() - t0;
+    qs('#pingMs').textContent = `${ms} ms`;
+    log('recv', `pong  ←  ${ms}ms  socketId=${res.socketId}`);
+  });
+}
+
+/* ══════════════════════════════════════════════
+   Private DM — server.to(targetSocketId)
+══════════════════════════════════════════════ */
+function openDM() {
+  qs('#myIdHint').textContent = `Your ID: ${myId}`;
+  qs('#dmOverlay').classList.add('show');
+}
+function closeDM() { qs('#dmOverlay').classList.remove('show'); }
+function sendDM() {
+  const to  = qs('#dmTo').value.trim();
+  const msg = qs('#dmMsg').value.trim();
+  if (!to || !msg) return;
+  log('emit', `user:private-message  →  to=${to}`);
+  socket.emit('user:private-message', { toSocketId: to, content: msg }, ack => {
+    log('recv', `ACK private-message  success=${ack?.success}`);
+  });
+  qs('#dmTo').value = ''; qs('#dmMsg').value = '';
+  closeDM();
+}
+
+/* ══════════════════════════════════════════════
+   UI HELPERS
+══════════════════════════════════════════════ */
+function onKey(e) {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMsg(); }
+}
+
+function setOnline(on) {
+  qs('#dot').className       = on ? 'dot on' : 'dot';
+  qs('#connLabel').textContent = on ? `${myId?.slice(0,10)}…` : 'Disconnected';
+}
+
+function appendMsg(msg) {
+  const box = qs('#msgs');
+  const isMe = msg.senderId === myId;
+  if (msg.type === 'system') {
+    const el = mk('div','sys-msg'); el.textContent = msg.content; box.appendChild(el);
+  } else {
+    const wrap = mk('div', `msg${isMe ? ' msg-me' : ''}`);
+    wrap.innerHTML = `
+      <div class="msg-hdr">
+        <span class="msg-name">${esc(msg.senderName)}</span>
+        <span class="msg-ts">${new Date(msg.timestamp).toLocaleTimeString()}</span>
+      </div>
+      <div class="bubble">${esc(msg.content)}</div>`;
+    box.appendChild(wrap);
+  }
+  box.scrollTop = box.scrollHeight;
+}
+
+function appendDM(from, content) {
+  const box = qs('#msgs');
+  const wrap = mk('div','msg');
+  wrap.innerHTML = `
+    <div class="msg-hdr">
+      <span class="msg-name dm-name">🔒 DM from ${esc(from)}</span>
+    </div>
+    <div class="bubble dm-bubble">${esc(content)}</div>`;
+  box.appendChild(wrap);
+  box.scrollTop = box.scrollHeight;
+}
+
+function renderHistory(messages) {
+  qs('#msgs').innerHTML = '';
+  messages.forEach(appendMsg);
+}
+
+function renderTyping() {
+  const bar = qs('#typingBar');
+  if (typingPeers.size === 0) { bar.innerHTML = ''; return; }
+  const names = [...typingPeers].join(', ');
+  bar.innerHTML = `<div class="tdots"><span></span><span></span><span></span></div>${esc(names)} ${typingPeers.size === 1 ? 'is' : 'are'} typing…`;
+}
+
+function updateSub(roomId, count) {
+  if (roomId === currentRoom)
+    qs('#chatSub').textContent = `${count} member${count !== 1 ? 's' : ''}`;
+}
+
+function addRoomTab(roomId) {
+  const wrap = qs('#roomsWrap');
+  wrap.querySelector('[data-ph]')?.remove();
+  if (!wrap.querySelector(`[data-room="${roomId}"]`)) {
+    const el = mk('div','room-row active');
+    el.setAttribute('data-room', roomId);
+    el.innerHTML = `<span class="room-hash">#</span><span>${esc(roomId)}</span><span class="room-badge">joined</span>`;
+    wrap.appendChild(el);
+  }
+}
+
+function renderStats(s) {
+  const wrap = qs('#usersWrap');
+  wrap.innerHTML = '';
+  const el = mk('div','user-row');
+  el.innerHTML = `<span class="udot"></span><span style="color:var(--txt)">${s.connectedUsers} connected</span>`;
+  wrap.appendChild(el);
+  s.rooms.forEach(r => {
+    const re = mk('div','user-row');
+    re.innerHTML = `<span style="width:6px"></span><span>#${esc(r.id)} — ${r.memberCount} members</span>`;
+    wrap.appendChild(re);
+  });
+}
+
+function resetUI() {
+  qs('#conBtn').disabled   = false;
+  qs('#disBtn').disabled   = true;
+  qs('#joinBtn').disabled  = true;
+  qs('#pingBtn').disabled  = true;
+  qs('#ta').disabled       = true;
+  qs('#sendBtn').disabled  = true;
+  qs('#leaveBtn').disabled = true;
+  qs('#dmBtn').disabled    = true;
+  qs('#chatTitle').textContent = 'No room joined';
+  qs('#chatSub').textContent   = '';
+  qs('#roomsWrap').innerHTML   = '<div style="padding:10px 6px;font-size:11px;color:var(--muted);text-align:center" data-ph>Connect first</div>';
+  qs('#msgs').innerHTML        = '<div class="empty" id="emptyState"><div class="empty-icon">⚡</div><p>Connect and join a room to start chatting</p></div>';
+  qs('#pingMs').textContent    = '';
+  currentRoom = null; myId = null;
+  joinedRooms.clear();
+  typingPeers.clear();
+}
+
+function log(type, msg) {
+  const el = qs('#elog');
+  const ts = new Date().toLocaleTimeString('en',{hour12:false});
+  const row = mk('div','le');
+  row.innerHTML = `<span class="le-ts">${ts}</span><span class="le-${type}">${esc(msg)}</span>`;
+  el.appendChild(row);
+  el.scrollTop = el.scrollHeight;
+  while (el.children.length > 120) el.removeChild(el.firstChild);
+}
+
+function qs(s) { return document.querySelector(s); }
+function mk(tag, cls) { const el = document.createElement(tag); if (cls) el.className = cls; return el; }
+function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+</script>
+</body>
+</html>
